@@ -46,3 +46,28 @@ appears in input reports. This is a likely handshake:
 1. Set AUDIO_CONTROL_ENABLE + MIC_VOLUME_ENABLE in output report 0x31
 2. Controller switches to extended input mode (547 bytes)
 3. Input reports now contain mic audio data
+
+## New findings from DSX RE (2026-03-23)
+
+DSX BTStream has separate handling for audio vs haptics in report 0x32:
+- **Haptics** = raw PCM sub-packets (sub-packet 0x12)
+- **Audio** (speaker/jack) = Opus-encoded sub-packets (sub-packet 0x13?)
+- **Both** can coexist in one report (variant `_AHD`)
+
+DSX config flags relevant to mic:
+- `BluetoothHapticsConfigSpeakerHeadsetEnabled`
+- `BluetoothHapticsAudioOutputMode`: 0=speaker, 1=headset, 2=both
+
+This suggests mic input may be enabled by setting similar flags in report 0x31
+config bytes, then reading audio sub-packets from extended input reports.
+
+The 547-byte input report size matches: 78 bytes standard + ~469 bytes audio data.
+At 48kHz/16-bit/mono that's ~4.9ms of audio per report — plausible for low-latency mic.
+
+## Experimental plan (needs controller)
+
+1. Start haptics (report 0x32) to put controller in audio mode
+2. Set AUDIO_CONTROL_ENABLE flag in report 0x31 byte [2] (flags0)
+3. Read input reports — check if size changes from 78 to 547
+4. If 547: parse bytes 78+ for audio sub-packets
+5. If audio found: decode (likely PCM or Opus) and pipe to PipeWire source
