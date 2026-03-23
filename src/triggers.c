@@ -92,7 +92,7 @@ bool ds_effect_slope_feedback(uint8_t *dst, uint8_t start_pos, uint8_t end_pos,
 		return false;
 
 	uint8_t strengths[10] = {0};
-	float slope = (float)(end_str - start_str) / (float)(end_pos - start_pos);
+	float slope = (float)((int)end_str - (int)start_str) / (float)((int)end_pos - (int)start_pos);
 
 	for (int i = start_pos; i < 10; i++) {
 		if (i <= end_pos)

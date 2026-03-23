@@ -14,36 +14,9 @@
 #include <fcntl.h>
 #include <linux/hidraw.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-
-/* Read a hex value from a sysfs uevent file for a given key. */
-static int read_uevent_hex(const char *sysfs_dir, const char *key, uint32_t *out)
-{
-	char path[512];
-	snprintf(path, sizeof(path), "%s/device/uevent", sysfs_dir);
-
-	FILE *f = fopen(path, "r");
-	if (!f)
-		return -errno;
-
-	char line[256];
-	size_t klen = strlen(key);
-	int ret = -ENOENT;
-
-	while (fgets(line, sizeof(line), f)) {
-		if (strncmp(line, key, klen) == 0 && line[klen] == '=') {
-			*out = (uint32_t)strtoul(line + klen + 1, NULL, 16);
-			ret = 0;
-			break;
-		}
-	}
-
-	fclose(f);
-	return ret;
-}
 
 /*
  * Parse HID_ID from uevent: "HID_ID=0003:0000054C:00000CE6"
@@ -123,7 +96,7 @@ int ds_hidraw_open(const char *path, int *fd, ds_conn_t *conn)
 		if (strncmp(entry->d_name, "hidraw", 6) != 0)
 			continue;
 
-		char sysfs[256];
+		char sysfs[512];
 		snprintf(sysfs, sizeof(sysfs), "/sys/class/hidraw/%s", entry->d_name);
 
 		uint16_t vid, pid, bus;
@@ -133,7 +106,7 @@ int ds_hidraw_open(const char *path, int *fd, ds_conn_t *conn)
 		if (!is_dualsense(vid, pid))
 			continue;
 
-		char devpath[64];
+		char devpath[512];
 		snprintf(devpath, sizeof(devpath), "/dev/%s", entry->d_name);
 
 		ret = try_open(devpath, fd, conn);

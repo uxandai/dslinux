@@ -79,7 +79,9 @@ static int cmd_trigger(ds_device_t *dev, int argc, char **argv)
 		ds_trigger_weapon(dev, side, parse_u8(argv[2]), parse_u8(argv[3]), parse_u8(argv[4]));
 	} else if (strcasecmp(mode, "vibration") == 0) {
 		if (argc < 5) { fprintf(stderr, "vibration: need <pos> <amp> <freq>\n"); return 1; }
-		ds_trigger_vibration(dev, side, parse_u8(argv[2]), parse_u8(argv[3]), parse_u8(argv[4]));
+		if (ds_trigger_vibration(dev, side, parse_u8(argv[2]), parse_u8(argv[3]), parse_u8(argv[4])) < 0) {
+			fprintf(stderr, "Invalid vibration parameters\n"); return 1;
+		}
 	} else if (strcasecmp(mode, "bow") == 0) {
 		if (argc < 6) { fprintf(stderr, "bow: need <start> <end> <str> <snap>\n"); return 1; }
 		ds_trigger_bow(dev, side, parse_u8(argv[2]), parse_u8(argv[3]),

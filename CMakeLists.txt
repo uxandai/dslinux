@@ -3,6 +3,17 @@ project(dualsense C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Compiler warnings
+add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+
+# Debug sanitizers
+option(DUALSENSE_SANITIZERS "Enable ASan + UBSan in debug builds" OFF)
+if(DUALSENSE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
 
 # Library sources
 set(LIB_SOURCES
