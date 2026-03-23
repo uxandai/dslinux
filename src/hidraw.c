@@ -123,3 +123,47 @@ void ds_hidraw_close(int fd)
 	if (fd >= 0)
 		close(fd);
 }
+
+bool ds_hidraw_alive(int fd)
+{
+	struct hidraw_devinfo info;
+	return ioctl(fd, HIDIOCGRAWINFO, &info) == 0;
+}
+
+/*
+ * ── Auto-reconnect (scaffolding, not yet wired into daemon) ────
+ *
+ * TODO: Integrate into dualsensed main loop:
+ *   1. Detect disconnect via ds_send() returning -ENODEV
+ *   2. Call ds_hidraw_wait_reconnect() which polls /sys/class/hidraw/
+ *   3. When device reappears, reopen fd and resume
+ *
+ * int ds_hidraw_wait_reconnect(int *fd, ds_conn_t *conn, int timeout_sec)
+ * {
+ *     for (int elapsed = 0; elapsed < timeout_sec; elapsed++) {
+ *         if (ds_hidraw_open(NULL, fd, conn) == 0)
+ *             return 0;
+ *         sleep(1);
+ *     }
+ *     return -ETIMEDOUT;
+ * }
+ *
+ * Better approach: use udev_monitor to get hotplug events:
+ *
+ * #include <libudev.h>
+ *
+ * int ds_hidraw_monitor_fd(void)
+ * {
+ *     struct udev *udev = udev_new();
+ *     struct udev_monitor *mon = udev_monitor_new_from_netlink(udev, "udev");
+ *     udev_monitor_filter_add_match_subsystem_devtype(mon, "hidraw", NULL);
+ *     udev_monitor_enable_receiving(mon);
+ *     return udev_monitor_get_fd(mon);  // add to poll() loop
+ * }
+ *
+ * When poll() fires on the udev monitor fd:
+ *   struct udev_device *dev = udev_monitor_receive_device(mon);
+ *   const char *action = udev_device_get_action(dev);  // "add" or "remove"
+ *   const char *devnode = udev_device_get_devnode(dev); // "/dev/hidraw3"
+ *   // If action=="add" and VID/PID matches → reopen
+ */

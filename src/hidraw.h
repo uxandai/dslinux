@@ -1,6 +1,7 @@
 #ifndef DS_HIDRAW_H
 #define DS_HIDRAW_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "../include/dualsense.h"
 
@@ -17,5 +18,11 @@ int ds_hidraw_open(const char *path, int *fd, ds_conn_t *conn);
  * Close a hidraw file descriptor.
  */
 void ds_hidraw_close(int fd);
+
+/*
+ * Check if a hidraw fd is still valid (device connected).
+ * @return true if device is accessible, false if disconnected.
+ */
+bool ds_hidraw_alive(int fd);
 
 #endif /* DS_HIDRAW_H */
