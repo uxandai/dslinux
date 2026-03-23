@@ -1,0 +1,9 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: dualsense
+Description: DualSense adaptive triggers, rumble, and LED control over BT/USB on Linux
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -ldualsense -lpthread
+Cflags: -I${includedir}

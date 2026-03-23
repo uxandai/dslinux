@@ -139,6 +139,45 @@ void ds_player_leds(ds_device_t *dev, uint8_t mask);
 /* Set mute button LED. */
 void ds_mute_led(ds_device_t *dev, ds_mute_led_t mode);
 
+/* ── Input reading ────────────────────────────────────────────────── */
+
+/* Parsed controller input state. */
+typedef struct {
+	uint8_t lx, ly, rx, ry;      /* stick axes, 0-255, center ~128 */
+	uint8_t l2, r2;               /* trigger analog, 0-255 */
+	uint8_t dpad;                 /* 0-7 clockwise from N, 8=released */
+	uint8_t battery_level;        /* 0-100 % */
+	uint8_t seq;                  /* report sequence number */
+	uint32_t timestamp;           /* controller timestamp (5.33µs units) */
+
+	/* Buttons */
+	uint8_t square   :1, cross  :1, circle :1, triangle :1;
+	uint8_t l1       :1, r1     :1, l2_btn :1, r2_btn   :1;
+	uint8_t create   :1, options:1, ps     :1, touchpad_btn :1;
+	uint8_t mute     :1, l3     :1, r3     :1, battery_charging :1;
+
+	/* Touchpad (2 fingers) */
+	struct {
+		uint16_t x, y;            /* 0-1919, 0-1079 */
+		uint8_t id;               /* tracking ID */
+		uint8_t active;           /* 1 if touching */
+	} touch[2];
+
+	/* IMU (raw signed 16-bit) */
+	int16_t gyro_x, gyro_y, gyro_z;
+	int16_t accel_x, accel_y, accel_z;
+} ds_input_state_t;
+
+/*
+ * Read and parse one input report from the controller.
+ * @param dev   Device handle.
+ * @param out   Parsed state (filled on success).
+ * @return 0 on success, -EAGAIN if no data available, negative errno on error.
+ *
+ * The hidraw fd is non-blocking.  Call in a loop with poll() or select().
+ */
+int ds_read_input(ds_device_t *dev, ds_input_state_t *out);
+
 /* ── Send ─────────────────────────────────────────────────────────── */
 
 /*

@@ -1,0 +1,17 @@
+{
+  "name": "Red Dead Redemption 2",
+  "process": ["RDR2.exe"],
+  "steam_appid": 1174180,
+  "right_trigger": {
+    "mode": "weapon",
+    "start": 2,
+    "end": 7,
+    "strength": 8
+  },
+  "left_trigger": {
+    "mode": "feedback",
+    "position": 0,
+    "strength": 3
+  },
+  "lightbar": { "r": 180, "g": 50, "b": 30 }
+}

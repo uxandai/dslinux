@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(dualsense C)
+project(dualsense VERSION 0.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -22,6 +22,7 @@ set(LIB_SOURCES
     src/triggers.c
     src/hidraw.c
     src/haptics.c
+    src/input.c
 )
 
 # Shared library
@@ -76,4 +77,21 @@ install(FILES udev/99-dualsense.rules
 
 install(FILES daemon/dualsensed.service
     DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user
+)
+
+# pkg-config
+configure_file(dualsense.pc.in dualsense.pc @ONLY)
+install(FILES ${CMAKE_BINARY_DIR}/dualsense.pc
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+)
+
+# Haptics test tool install
+install(TARGETS ds-haptics-test
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# GUI script install
+install(PROGRAMS gui/dualsense-gui.py
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RENAME dualsense-gui
 )

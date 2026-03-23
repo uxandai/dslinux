@@ -27,6 +27,7 @@
 #include "crc32.h"
 #include "triggers.h"
 #include "hidraw.h"
+#include "input.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -396,6 +397,54 @@ int ds_send(ds_device_t *dev)
 	dev->dirty_lightbar = false;
 	dev->dirty_player_leds = false;
 	dev->dirty_mute_led = false;
+
+	return 0;
+}
+
+/* ── Input reading ──────────────────────────────────────────────── */
+
+int ds_read_input(ds_device_t *dev, ds_input_state_t *out)
+{
+	uint8_t buf[128];
+	ssize_t n = read(dev->fd, buf, sizeof(buf));
+	if (n < 0)
+		return -errno;
+	if (n == 0)
+		return -EIO;
+
+	ds_input_t parsed;
+	if (ds_input_parse(buf, (size_t)n, &parsed) < 0)
+		return -EINVAL;
+
+	/* Map internal parsed struct to public API struct */
+	out->lx = parsed.lx; out->ly = parsed.ly;
+	out->rx = parsed.rx; out->ry = parsed.ry;
+	out->l2 = parsed.l2; out->r2 = parsed.r2;
+	out->dpad = parsed.dpad;
+	out->seq = parsed.seq;
+	out->timestamp = parsed.timestamp;
+	out->battery_level = parsed.battery_level;
+
+	out->square = parsed.square; out->cross = parsed.cross;
+	out->circle = parsed.circle; out->triangle = parsed.triangle;
+	out->l1 = parsed.l1; out->r1 = parsed.r1;
+	out->l2_btn = parsed.l2_btn; out->r2_btn = parsed.r2_btn;
+	out->create = parsed.create; out->options = parsed.options;
+	out->ps = parsed.ps; out->touchpad_btn = parsed.touchpad_btn;
+	out->mute = parsed.mute; out->l3 = parsed.l3; out->r3 = parsed.r3;
+	out->battery_charging = parsed.battery_charging;
+
+	for (int i = 0; i < 2; i++) {
+		out->touch[i].x = parsed.touch[i].x;
+		out->touch[i].y = parsed.touch[i].y;
+		out->touch[i].id = parsed.touch[i].id;
+		out->touch[i].active = parsed.touch[i].active;
+	}
+
+	out->gyro_x = parsed.gyro_x; out->gyro_y = parsed.gyro_y;
+	out->gyro_z = parsed.gyro_z;
+	out->accel_x = parsed.accel_x; out->accel_y = parsed.accel_y;
+	out->accel_z = parsed.accel_z;
 
 	return 0;
 }

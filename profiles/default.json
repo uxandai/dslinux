@@ -1,0 +1,8 @@
+{
+  "name": "Default",
+  "process": [],
+  "right_trigger": { "mode": "off" },
+  "left_trigger": { "mode": "off" },
+  "lightbar": { "r": 0, "g": 0, "b": 255 },
+  "player_leds": 4
+}

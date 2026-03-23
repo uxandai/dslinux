@@ -1,0 +1,19 @@
+{
+  "name": "Marvel's Spider-Man Remastered",
+  "process": ["Spider-Man.exe"],
+  "steam_appid": 1817070,
+  "right_trigger": {
+    "mode": "bow",
+    "start": 1,
+    "end": 6,
+    "strength": 7,
+    "snap_force": 5
+  },
+  "left_trigger": {
+    "mode": "vibration",
+    "position": 0,
+    "amplitude": 4,
+    "frequency": 20
+  },
+  "lightbar": { "r": 200, "g": 0, "b": 0 }
+}
