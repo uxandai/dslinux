@@ -88,6 +88,28 @@ It's a custom .NET IL-like interpreter. Could be reverse-engineered by:
 3. Log all output reports
 4. Correlate with audio being played
 
+## Experimental results (2026-03-23, FW 0x0110002a)
+
+Tested on real hardware. Findings:
+
+1. **Report 0x32 with sub-packet 0x12 (raw PCM) → haptics ONLY**
+   - Confirmed: raw 3kHz 8-bit PCM drives VCM actuators
+   - Changing pkt11 flags (0x01-0xFF) does NOT route audio to speaker
+   - Flag 0xFE = haptics, other values either do nothing or trigger mute
+
+2. **Setting speaker volume via report 0x31 does NOT help**
+   - Sent max speaker_volume (0xFF) + headphone_volume (0x7F) + audio_flags
+   - Still no audio from speaker/jack
+   - Confirms: speaker audio needs different encoding, not just volume
+
+3. **Conclusion: speaker requires Opus-encoded sub-packet (likely 0x13)**
+   - Raw PCM on sub-packet 0x12 = haptics only (proven)
+   - Speaker needs Opus at 48kHz (from DSX RE) on a different sub-packet
+   - Need BT packet capture from DSX to discover exact format
+
+4. **Bonus discovery**: some flag values in pkt11 data[0] control mute LED
+   (needs further investigation)
+
 ## For implementation
 
 Once the audio sub-packet format is known:
