@@ -50,7 +50,13 @@ add_executable(dsctl cli/dsctl.c)
 target_link_libraries(dsctl PRIVATE dualsense)
 
 # Daemon
-add_executable(dualsensed daemon/dualsensed.c)
+add_executable(dualsensed
+    daemon/dualsensed.c
+    daemon/json_parse.c
+    daemon/native_protocol.c
+    daemon/dsx_protocol.c
+)
+target_include_directories(dualsensed PRIVATE daemon)
 target_link_libraries(dualsensed PRIVATE dualsense)
 
 # Haptics test tool
