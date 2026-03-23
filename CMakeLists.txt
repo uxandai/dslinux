@@ -64,6 +64,11 @@ add_executable(ds-haptics-test cli/ds-haptics-test.c)
 target_include_directories(ds-haptics-test PRIVATE src)
 target_link_libraries(ds-haptics-test PRIVATE dualsense m)
 
+# Audio probe tool (experimental)
+add_executable(ds-audio-probe cli/ds-audio-probe.c src/crc32.c src/haptics.c)
+target_include_directories(ds-audio-probe PRIVATE src include)
+target_link_libraries(ds-audio-probe PRIVATE pthread m)
+
 # Tests
 enable_testing()
 
