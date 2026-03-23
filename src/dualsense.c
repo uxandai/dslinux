@@ -43,36 +43,106 @@
 #define DS_BT_REPORT_ID   0x31
 #define DS_USB_REPORT_ID  0x02
 
-/* Feature flag bits for flags byte 0: [2] (BT) / [1] (USB) */
-#define DS_FLAG0_HAPTICS       0x01  /* Enable rumble motor output */
-#define DS_FLAG0_TRIGGERS      0x02  /* Enable adaptive trigger output */
+/*
+ * Feature flag bits — verified by intercepting dualsensectl output.
+ *
+ * flags0 (valid_flag0) at [3] BT / [1] USB:
+ *   bit 0 (0x01): haptics (rumble motors)
+ *   bit 1 (0x02): triggers RIGHT
+ *   bit 2 (0x04): triggers LEFT  (dualsensectl uses 0x04 for both)
+ *
+ * flags1 (valid_flag1) at [4] BT / [2] USB:
+ *   bit 0 (0x01): mic mute LED
+ *   bit 1 (0x02): power save
+ *   bit 2 (0x04): lightbar
+ *   bit 4 (0x10): player LEDs
+ */
+/*
+ * Bit 0 (0x01): COMPATIBLE_VIBRATION — legacy rumble motors
+ * Bit 1 (0x02): HAPTICS_SELECT — select haptic feedback mode
+ * Bit 2 (0x04): RIGHT_TRIGGER_MOTOR_ENABLE
+ * Bit 3 (0x08): LEFT_TRIGGER_MOTOR_ENABLE
+ */
+#define DS_FLAG0_RUMBLE        0x01
+#define DS_FLAG0_HAPTICS_SEL   0x02
+#define DS_FLAG0_TRIGGER_R     0x04
+#define DS_FLAG0_TRIGGER_L     0x08
+#define DS_FLAG0_TRIGGERS      (DS_FLAG0_TRIGGER_R | DS_FLAG0_TRIGGER_L)
 
-/* Feature flag bits for flags byte 1: [3] (BT) / [2] (USB) */
 #define DS_FLAG1_MIC_MUTE_LED  0x01
 #define DS_FLAG1_LIGHTBAR      0x04
 #define DS_FLAG1_PLAYER_LEDS   0x10
 
+/*
+ * valid_flag2 at BT byte [45]:
+ *   Bit 0 (0x01): LED_BRIGHTNESS_CONTROL
+ *   Bit 1 (0x02): LIGHTBAR_SETUP_CONTROL
+ *   Bit 2 (0x04): COMPATIBLE_VIBRATION2 — needed alongside FLAG0 bit 0 for rumble
+ */
+#define DS_FLAG2_VIBRATION2    0x04
+
 /* LED brightness: 0x01 = fade-in at boot, 0x02 = full immediately */
 #define DS_LED_BRIGHTNESS_FULL 0x02
 
+/* BT byte offset for valid_flag2 */
+#define BT_OFF_FLAG2           45
+#define USB_OFF_FLAG2          43
+
 /* ── BT byte offsets ────────────────────────────────────────────── */
+/*
+ * BT report layout (from dualsensectl / kernel hid-playstation.c):
+ *   [0]  report_id = 0x31
+ *   [1]  seq_tag (high nibble) | flags (low nibble)
+ *   [2]  tag = 0x10
+ *   [3]  valid_flag0 (haptics/triggers enable)
+ *   [4]  valid_flag1 (LED enable)
+ *   [5]  motor_right
+ *   [6]  motor_left
+ *   [11] mute_button_led
+ *   [12] power_save_control
+ *   [13] right_trigger_motor_mode
+ *   [14..23] right_trigger_param[10]
+ *   [24] left_trigger_motor_mode
+ *   [25..34] left_trigger_param[10]
+ *   [44] led_brightness_mode
+ *   [46] player_leds
+ *   [47..49] lightbar R, G, B
+ *   [74..77] CRC32
+ */
 #define BT_OFF_REPORT_ID    0
 #define BT_OFF_SEQ_TAG      1
-#define BT_OFF_FLAGS0       2
-#define BT_OFF_FLAGS1       3
-#define BT_OFF_MOTOR_RIGHT  4
-#define BT_OFF_MOTOR_LEFT   5
-#define BT_OFF_MUTE_LED     10
-#define BT_OFF_R_TRIGGER    12   /* 11 bytes: mode + params[10] */
-#define BT_OFF_L_TRIGGER    23   /* 11 bytes: mode + params[10] */
-#define BT_OFF_LED_MODE     43
-#define BT_OFF_PLAYER_LEDS  45
-#define BT_OFF_LIGHTBAR_R   46
-#define BT_OFF_LIGHTBAR_G   47
-#define BT_OFF_LIGHTBAR_B   48
+#define BT_OFF_TAG          2
+#define BT_OFF_FLAGS0       3
+#define BT_OFF_FLAGS1       4
+#define BT_OFF_MOTOR_RIGHT  5
+#define BT_OFF_MOTOR_LEFT   6
+#define BT_OFF_MUTE_LED     11
+#define BT_OFF_R_TRIGGER    13   /* 11 bytes: mode + params[10] */
+#define BT_OFF_L_TRIGGER    24   /* 11 bytes: mode + params[10] */
+#define BT_OFF_LED_MODE     44
+#define BT_OFF_PLAYER_LEDS  46
+#define BT_OFF_LIGHTBAR_R   47
+#define BT_OFF_LIGHTBAR_G   48
+#define BT_OFF_LIGHTBAR_B   49
 #define BT_OFF_CRC          74   /* 4 bytes: CRC32 LE */
+#define BT_TAG_VALUE        0x10
 
-/* USB offsets = BT offsets - 1 (no seq_tag byte at position 1) */
+/*
+ * USB report layout:
+ *   [0]  report_id = 0x02
+ *   [1]  valid_flag0
+ *   [2]  valid_flag1
+ *   [3]  motor_right
+ *   [4]  motor_left
+ *   [9]  mute_button_led
+ *   [11] right_trigger_motor_mode
+ *   [12..21] right_trigger_param[10]
+ *   [22] left_trigger_motor_mode
+ *   [23..32] left_trigger_param[10]
+ *   [42] led_brightness_mode
+ *   [44] player_leds
+ *   [45..47] lightbar R, G, B
+ */
 #define USB_OFF_REPORT_ID   0
 #define USB_OFF_FLAGS0      1
 #define USB_OFF_FLAGS1      2
@@ -339,11 +409,16 @@ int ds_send(ds_device_t *dev)
 	/* Build feature flags based on dirty state */
 	uint8_t flags0 = 0;
 	uint8_t flags1 = 0;
+	uint8_t flags2 = 0;
 
-	if (dev->dirty_motors)
-		flags0 |= DS_FLAG0_HAPTICS;
-	if (dev->dirty_r_trigger || dev->dirty_l_trigger)
-		flags0 |= DS_FLAG0_TRIGGERS;
+	if (dev->dirty_motors) {
+		flags0 |= DS_FLAG0_RUMBLE | DS_FLAG0_HAPTICS_SEL;
+		flags2 |= DS_FLAG2_VIBRATION2;
+	}
+	if (dev->dirty_r_trigger)
+		flags0 |= DS_FLAG0_TRIGGER_R;
+	if (dev->dirty_l_trigger)
+		flags0 |= DS_FLAG0_TRIGGER_L;
 	if (dev->dirty_lightbar)
 		flags1 |= DS_FLAG1_LIGHTBAR;
 	if (dev->dirty_player_leds)
@@ -351,18 +426,15 @@ int ds_send(ds_device_t *dev)
 	if (dev->dirty_mute_led)
 		flags1 |= DS_FLAG1_MIC_MUTE_LED;
 
-	/* Always send at least rumble+trigger flags to maintain state */
-	if (flags0 == 0 && flags1 == 0)
-		flags0 = DS_FLAG0_HAPTICS | DS_FLAG0_TRIGGERS;
-
 	int report_size;
 	uint8_t seq_before = dev->seq;  /* save for rollback on write failure */
 
 	if (dev->conn == DS_BT) {
 		report_size = DS_BT_REPORT_SIZE;
 		report[BT_OFF_REPORT_ID] = DS_BT_REPORT_ID;
-		report[BT_OFF_SEQ_TAG] = ((dev->seq & 0x0F) << 4) | 0x02;
+		report[BT_OFF_SEQ_TAG] = (dev->seq & 0x0F) << 4;
 		dev->seq = (dev->seq + 1) & 0x0F;
+		report[BT_OFF_TAG] = BT_TAG_VALUE;
 
 		report[BT_OFF_FLAGS0] = flags0;
 		report[BT_OFF_FLAGS1] = flags1;
@@ -373,6 +445,7 @@ int ds_send(ds_device_t *dev)
 		memcpy(&report[BT_OFF_R_TRIGGER], dev->r_trigger, DS_TRIGGER_EFFECT_SIZE);
 		memcpy(&report[BT_OFF_L_TRIGGER], dev->l_trigger, DS_TRIGGER_EFFECT_SIZE);
 
+		report[BT_OFF_FLAG2] = flags2;
 		report[BT_OFF_LED_MODE] = DS_LED_BRIGHTNESS_FULL;
 		report[BT_OFF_PLAYER_LEDS] = dev->player_leds;
 		report[BT_OFF_LIGHTBAR_R] = dev->lightbar_r;
@@ -398,6 +471,7 @@ int ds_send(ds_device_t *dev)
 		memcpy(&report[USB_OFF_R_TRIGGER], dev->r_trigger, DS_TRIGGER_EFFECT_SIZE);
 		memcpy(&report[USB_OFF_L_TRIGGER], dev->l_trigger, DS_TRIGGER_EFFECT_SIZE);
 
+		report[USB_OFF_FLAG2] = flags2;
 		report[USB_OFF_LED_MODE] = DS_LED_BRIGHTNESS_FULL;
 		report[USB_OFF_PLAYER_LEDS] = dev->player_leds;
 		report[USB_OFF_LIGHTBAR_R] = dev->lightbar_r;

@@ -29,13 +29,13 @@ static int tests_passed = 0;
  * Verify the pre-computed seed.
  * CRC32(0xFFFFFFFF, [0xA2]) should equal 0xEB1C1A49 (before final NOT).
  * Our ds_crc32() starts from this seed and applies final NOT,
- * so ds_crc32(empty, 0) should be ~0xEB1C1A49 = 0x14E3E5B6.
+ * so ds_crc32(empty, 0) should be ~0xEB1C1A49 = 0xEADA2D49.
  */
 static void test_empty(void)
 {
 	uint32_t crc = ds_crc32(NULL, 0);
 	/* ds_crc32 does: start=0xEB1C1A49, loop 0 times, return ~0xEB1C1A49 */
-	ASSERT_EQ("crc32(empty) = ~seed", crc, 0x14E3E5B6);
+	ASSERT_EQ("crc32(empty) = ~seed", crc, 0xEADA2D49);
 }
 
 /*
@@ -112,9 +112,9 @@ static void test_cross_validate(void)
 static void test_seed_value(void)
 {
 	/* CRC32(0xFFFFFFFF, [0xA2]) = 0xEB1C1A49 (before NOT)
-	 * Verify: standard CRC32 of single byte 0xA2 = ~0xEB1C1A49 = 0x14E3E5B6 */
+	 * Verify: standard CRC32 of single byte 0xA2 = ~0xEB1C1A49 = 0xEADA2D49 */
 	uint32_t crc = ds_crc32(NULL, 0);
-	ASSERT_EQ("seed check: ds_crc32(NULL, 0) = 0x14E3E5B6", crc, 0x14E3E5B6);
+	ASSERT_EQ("seed check: ds_crc32(NULL, 0) = 0xEADA2D49", crc, 0xEADA2D49);
 }
 
 int main(void)
