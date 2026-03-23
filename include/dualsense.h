@@ -76,6 +76,9 @@ int ds_open_all(ds_device_t **devs, int max);
 /* Query connection type.  dev must not be NULL. */
 ds_conn_t ds_connection_type(const ds_device_t *dev);
 
+/* Get the underlying hidraw file descriptor (for haptics streaming etc). */
+int ds_get_fd(const ds_device_t *dev);
+
 /* ── Adaptive triggers ────────────────────────────────────────────── */
 
 /*

@@ -40,7 +40,7 @@ static void generate_sine_frame(uint8_t *buf, double freq, uint64_t *sample_idx)
 {
 	for (int i = 0; i < DS_HAPTICS_SAMPLE_SIZE; i += 2) {
 		double t = (double)(*sample_idx) / DS_HAPTICS_SAMPLE_RATE;
-		double val = sin(2.0 * M_PI * freq * t) * 100.0;  /* amplitude ~100/255 */
+		double val = sin(2.0 * M_PI * freq * t) * 127.0;  /* max amplitude */
 		uint8_t u8val = (uint8_t)(128.0 + val);
 		buf[i]     = u8val;  /* left */
 		buf[i + 1] = u8val;  /* right */
@@ -121,23 +121,7 @@ int main(int argc, char **argv)
 	printf("DualSense connected via %s\n",
 	       ds_connection_type(dev) == DS_BT ? "Bluetooth" : "USB");
 
-	/* We need the raw fd — extract it by using ds_send once and reusing the handle.
-	 * Ugly but works: ds_haptics_start needs the fd directly.
-	 * TODO: add ds_get_fd() to public API */
-	/* For now, re-open the device directly */
-	int fd;
-	{
-		/* Re-detect hidraw path — we need the fd */
-		extern int ds_hidraw_open(const char *path, int *fd, ds_conn_t *conn);
-		ds_conn_t conn;
-		if (ds_hidraw_open(devpath, &fd, &conn) < 0) {
-			perror("Failed to open hidraw for haptics");
-			ds_close(dev);
-			return 1;
-		}
-	}
-
-	ds_haptics_t *h = ds_haptics_start(fd);
+	ds_haptics_t *h = ds_haptics_start(ds_get_fd(dev));
 	if (!h) {
 		perror("Failed to start haptics stream");
 		ds_close(dev);
@@ -155,7 +139,6 @@ int main(int argc, char **argv)
 
 	printf("\nStopping haptics...\n");
 	ds_haptics_stop(h);
-	close(fd);
 	ds_close(dev);
 	return 0;
 }

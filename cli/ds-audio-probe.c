@@ -45,13 +45,13 @@ static void sig_handler(int sig)
 static int open_hidraw(const char *path)
 {
 	if (path)
-		return open(path, O_RDWR | O_NONBLOCK);
+		return open(path, O_RDWR);
 
 	/* Auto-detect */
 	for (int i = 0; i < 20; i++) {
 		char devpath[64];
 		snprintf(devpath, sizeof(devpath), "/dev/hidraw%d", i);
-		int fd = open(devpath, O_RDWR | O_NONBLOCK);
+		int fd = open(devpath, O_RDWR);
 		if (fd < 0) continue;
 
 		struct hidraw_devinfo info;

@@ -248,6 +248,11 @@ ds_conn_t ds_connection_type(const ds_device_t *dev)
 	return dev->conn;
 }
 
+int ds_get_fd(const ds_device_t *dev)
+{
+	return dev->fd;
+}
+
 /* ── Trigger helpers ────────────────────────────────────────────── */
 
 /*

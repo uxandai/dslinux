@@ -70,7 +70,7 @@ static ds_conn_t detect_connection(int fd)
 
 static int try_open(const char *devpath, int *fd, ds_conn_t *conn)
 {
-	int f = open(devpath, O_RDWR | O_NONBLOCK);
+	int f = open(devpath, O_RDWR);
 	if (f < 0)
 		return -errno;
 

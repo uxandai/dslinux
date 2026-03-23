@@ -1,13 +1,9 @@
 /*
  * DualSense BT Audio Haptics — Report 0x32 streaming.
  *
- * Based on protocol discovered by SAxense (https://github.com/egormanga/SAxense).
- * The DualSense accepts raw 3kHz 8-bit stereo PCM via HID report 0x32,
- * driving the VCM linear resonant actuators for HD haptic feedback.
- *
- * This module runs a real-time thread that sends audio frames at ~94 Hz
- * (one 64-byte frame every ~10.67ms).  Audio is fed via ds_haptics_write()
- * from any source (PipeWire capture, file playback, sine generator, etc).
+ * Based on SAxense (https://github.com/egormanga/SAxense).
+ * Uses POSIX timer + signal handler for precise timing,
+ * identical to the proven SAxense architecture.
  */
 
 #include "haptics.h"
@@ -15,148 +11,116 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
-/* Ring buffer for audio samples.  ~1 second at 3kHz stereo 8-bit. */
-#define RING_SIZE (DS_HAPTICS_SAMPLE_RATE * DS_HAPTICS_CHANNELS)  /* 6000 bytes */
+#define RING_SIZE (DS_HAPTICS_SAMPLE_RATE * DS_HAPTICS_CHANNELS)
 
-/* ── Sub-packet encoding ────────────────────────────────────────── */
+/* ── Report structure (matches SAxense exactly) ─────────────────── */
 
-/*
- * Sub-packet header format:
- *   bit 0:    sized (1 = length field present)
- *   bit 1:    unk
- *   bits 2-7: pid (packet type ID)
- */
-static inline uint8_t subpacket_header(uint8_t pid, bool sized)
-{
-	return (uint8_t)((pid << 2) | (sized ? 0x01 : 0x00));
-}
+typedef struct __attribute__((packed)) {
+	uint8_t pid    :6;
+	uint8_t unk    :1;
+	uint8_t sized  :1;
+	uint8_t length;
+	uint8_t data[];
+} subpacket_t;
 
-/* Sub-packet 0x11: config/flags (9 bytes total: header + length + 7 data) */
-#define PKT11_OFFSET  2   /* offset in report */
-#define PKT11_SIZE    9
-/* Sub-packet 0x12: audio (2 + 64 bytes: header + length + samples) */
-#define PKT12_OFFSET  (PKT11_OFFSET + PKT11_SIZE)  /* = 11 */
-#define PKT12_SIZE    (2 + DS_HAPTICS_SAMPLE_SIZE)  /* = 66 */
-
-/* CRC covers bytes [0..136], stored at [137..140] */
-#define CRC_OFFSET    (DS_HAPTICS_REPORT_SIZE - 4)  /* = 137 */
+struct __attribute__((packed)) haptics_report {
+	uint8_t report_id;
+	union {
+		struct __attribute__((packed)) {
+			uint8_t tag :4;
+			uint8_t seq :4;
+			uint8_t data[];
+		};
+		struct __attribute__((packed)) {
+			uint8_t payload[DS_HAPTICS_REPORT_SIZE - sizeof(uint32_t)];
+			uint32_t crc;
+		};
+	};
+};
 
 /* ── Haptics stream state ───────────────────────────────────────── */
 
 struct ds_haptics {
-	int fd;                  /* hidraw fd (not owned, do not close) */
-	pthread_t thread;
+	int fd;
+	FILE *fp;              /* FILE* wrapping fd for fwrite_unlocked */
 	volatile bool running;
+	timer_t timerid;
+
+	/* Pointers into report struct (like SAxense's ii/sample) */
+	struct haptics_report *report;
+	uint8_t *frame_counter;  /* points into pkt11 data[6] */
+	uint8_t *sample_buf;     /* points into pkt12 data */
 
 	/* Audio ring buffer */
 	pthread_mutex_t ring_lock;
 	uint8_t ring[RING_SIZE];
-	size_t ring_head;        /* write position */
-	size_t ring_tail;        /* read position */
-	size_t ring_avail;       /* bytes available to read */
-
-	/* Report state */
-	uint8_t seq;             /* sequence counter (upper nibble) */
-	uint8_t frame_counter;   /* config sub-packet frame counter */
+	size_t ring_head;
+	size_t ring_tail;
+	size_t ring_avail;
 };
 
-/* ── Ring buffer ops ────────────────────────────────────────────── */
+/* Global pointer for signal handler (SAxense pattern) */
+static ds_haptics_t *g_haptics = NULL;
+
+/* ── Ring buffer ────────────────────────────────────────────────── */
 
 static size_t ring_read(ds_haptics_t *h, uint8_t *out, size_t len)
 {
 	pthread_mutex_lock(&h->ring_lock);
-
 	size_t to_read = (len < h->ring_avail) ? len : h->ring_avail;
 	for (size_t i = 0; i < to_read; i++) {
 		out[i] = h->ring[h->ring_tail];
 		h->ring_tail = (h->ring_tail + 1) % RING_SIZE;
 	}
 	h->ring_avail -= to_read;
-
 	pthread_mutex_unlock(&h->ring_lock);
 	return to_read;
 }
 
-/* ── Build and send one haptics report ──────────────────────────── */
+/* ── CRC32 (SAxense-compatible) ─────────────────────────────────── */
 
-static void send_haptics_report(ds_haptics_t *h)
+static uint32_t haptics_crc32(const uint8_t *data, size_t size)
 {
-	uint8_t report[DS_HAPTICS_REPORT_SIZE];
-	memset(report, 0, sizeof(report));
-
-	/* Header */
-	report[0] = DS_HAPTICS_REPORT_ID;  /* 0x32 */
-	report[1] = (h->seq & 0x0F) << 4;  /* seq in upper nibble, tag=0 */
-	h->seq = (h->seq + 1) & 0x0F;
-
-	/* Sub-packet 0x11: config */
-	report[PKT11_OFFSET + 0] = subpacket_header(0x11, true);
-	report[PKT11_OFFSET + 1] = 7;  /* length */
-	report[PKT11_OFFSET + 2] = 0xFE;  /* flags: enable audio output */
-	report[PKT11_OFFSET + 3] = 0;
-	report[PKT11_OFFSET + 4] = 0;
-	report[PKT11_OFFSET + 5] = 0;
-	report[PKT11_OFFSET + 6] = 0;
-	report[PKT11_OFFSET + 7] = 0xFF;
-	report[PKT11_OFFSET + 8] = h->frame_counter++;
-
-	/* Sub-packet 0x12: audio samples */
-	report[PKT12_OFFSET + 0] = subpacket_header(0x12, true);
-	report[PKT12_OFFSET + 1] = DS_HAPTICS_SAMPLE_SIZE;
-
-	/* Read audio from ring buffer, or fill with silence (0x80 = zero for u8) */
-	uint8_t samples[DS_HAPTICS_SAMPLE_SIZE];
-	size_t got = ring_read(h, samples, DS_HAPTICS_SAMPLE_SIZE);
-	if (got < DS_HAPTICS_SAMPLE_SIZE) {
-		/* Fill remainder with silence (0x80 = center for unsigned 8-bit) */
-		memset(samples + got, 0x80, DS_HAPTICS_SAMPLE_SIZE - got);
+	uint32_t crc = ~0xEADA2D49;
+	while (size--) {
+		crc ^= *data++;
+		for (unsigned i = 0; i < 8; i++)
+			crc = ((crc >> 1) ^ (0xEDB88320 & -(crc & 1)));
 	}
-	memcpy(&report[PKT12_OFFSET + 2], samples, DS_HAPTICS_SAMPLE_SIZE);
-
-	/* CRC32 over bytes [0..136] */
-	uint32_t crc = ds_crc32(report, CRC_OFFSET);
-	report[CRC_OFFSET + 0] = (uint8_t)(crc);
-	report[CRC_OFFSET + 1] = (uint8_t)(crc >> 8);
-	report[CRC_OFFSET + 2] = (uint8_t)(crc >> 16);
-	report[CRC_OFFSET + 3] = (uint8_t)(crc >> 24);
-
-	/* Write to hidraw */
-	ssize_t ret = write(h->fd, report, sizeof(report));
-	if (ret < 0 && errno != EAGAIN) {
-		perror("haptics write");
-		h->running = false;
-	}
+	return ~crc;
 }
 
-/* ── Real-time streaming thread ─────────────────────────────────── */
+/* ── Signal handler (called by timer, same pattern as SAxense) ── */
 
-static void *haptics_thread(void *arg)
+static void haptics_tick(int sig)
 {
-	ds_haptics_t *h = arg;
+	(void)sig;
+	ds_haptics_t *h = g_haptics;
+	if (!h || !h->running) return;
 
-	struct timespec next;
-	clock_gettime(CLOCK_MONOTONIC, &next);
+	/* Read audio from ring buffer into sample area */
+	size_t got = ring_read(h, h->sample_buf, DS_HAPTICS_SAMPLE_SIZE);
+	if (got < DS_HAPTICS_SAMPLE_SIZE)
+		memset(h->sample_buf + got, 0x80, DS_HAPTICS_SAMPLE_SIZE - got);
 
-	while (h->running) {
-		send_haptics_report(h);
+	/* Increment frame counter */
+	(*h->frame_counter)++;
 
-		/* Advance to next frame time */
-		next.tv_nsec += DS_HAPTICS_INTERVAL_NS;
-		while (next.tv_nsec >= 1000000000L) {
-			next.tv_nsec -= 1000000000L;
-			next.tv_sec++;
-		}
-		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
-	}
+	/* Compute CRC */
+	h->report->crc = haptics_crc32(
+		(void *)h->report, 1 + sizeof(h->report->payload));
 
-	return NULL;
+	/* Write report (fwrite_unlocked like SAxense) */
+	fwrite_unlocked(h->report, sizeof(*h->report), 1, h->fp);
 }
 
 /* ── Public API ─────────────────────────────────────────────────── */
@@ -170,17 +134,67 @@ ds_haptics_t *ds_haptics_start(int hidraw_fd)
 	h->running = true;
 	pthread_mutex_init(&h->ring_lock, NULL);
 
-	/* Fill ring with silence */
-	memset(h->ring, 0x80, RING_SIZE);
-
-	if (pthread_create(&h->thread, NULL, haptics_thread, h) != 0) {
+	/* Wrap fd in FILE* for fwrite_unlocked */
+	h->fp = fdopen(dup(hidraw_fd), "wb");
+	if (!h->fp) {
 		free(h);
 		return NULL;
 	}
+	setbuf(h->fp, NULL);
 
-	/* Set thread to real-time priority if possible */
-	struct sched_param param = { .sched_priority = 50 };
-	pthread_setschedparam(h->thread, SCHED_FIFO, &param);
+	/* Build report structure (SAxense style) */
+	static const subpacket_t pkt11_template = {
+		.pid = 0x11, .sized = 1, .length = 7,
+		.data = {0xFE, 0, 0, 0, 0, 0xFF, 0},
+	};
+	static const subpacket_t pkt12_template = {
+		.pid = 0x12, .sized = 1, .length = DS_HAPTICS_SAMPLE_SIZE,
+	};
+
+	h->report = calloc(1, sizeof(*h->report));
+	h->report->report_id = DS_HAPTICS_REPORT_ID;
+	h->report->tag = 0;
+
+	/* Place sub-packets in report data area */
+	size_t pkt11_total = sizeof(pkt11_template) + pkt11_template.length;
+	subpacket_t *p11 = (void *)(h->report->data + 0);
+	subpacket_t *p12 = (void *)(h->report->data + pkt11_total);
+
+	memcpy(p11, &pkt11_template, pkt11_total);
+	memcpy(p12, &pkt12_template, sizeof(pkt12_template));
+
+	/* Set up pointers (same as SAxense's ii and sample) */
+	h->frame_counter = &p11->data[6];
+	h->sample_buf = p12->data;
+
+	/* Fill sample with silence */
+	memset(h->sample_buf, 0x80, DS_HAPTICS_SAMPLE_SIZE);
+
+	mlockall(MCL_CURRENT | MCL_FUTURE);
+
+	/* Set global for signal handler */
+	g_haptics = h;
+
+	/* Create POSIX timer with SIGRTMIN (identical to SAxense) */
+	struct sigevent se = {0};
+	se.sigev_notify = SIGEV_SIGNAL;
+	se.sigev_signo = SIGRTMIN;
+
+	signal(SIGRTMIN, haptics_tick);
+
+	if (timer_create(CLOCK_MONOTONIC, &se, &h->timerid) < 0) {
+		fclose(h->fp);
+		free(h->report);
+		free(h);
+		g_haptics = NULL;
+		return NULL;
+	}
+
+	struct itimerspec ts = {0};
+	ts.it_interval.tv_nsec = DS_HAPTICS_INTERVAL_NS;
+	ts.it_value.tv_nsec = 1;  /* start immediately */
+
+	timer_settime(h->timerid, 0, &ts, NULL);
 
 	return h;
 }
@@ -190,7 +204,15 @@ void ds_haptics_stop(ds_haptics_t *h)
 	if (!h) return;
 
 	h->running = false;
-	pthread_join(h->thread, NULL);
+
+	/* Stop timer */
+	struct itimerspec ts = {0};
+	timer_settime(h->timerid, 0, &ts, NULL);
+	timer_delete(h->timerid);
+
+	g_haptics = NULL;
+	fclose(h->fp);
+	free(h->report);
 	pthread_mutex_destroy(&h->ring_lock);
 	free(h);
 }
@@ -200,16 +222,14 @@ void ds_haptics_write(ds_haptics_t *h, const uint8_t *data, size_t len)
 	if (!h || !data || len == 0) return;
 
 	pthread_mutex_lock(&h->ring_lock);
-
 	for (size_t i = 0; i < len; i++) {
 		h->ring[h->ring_head] = data[i];
 		h->ring_head = (h->ring_head + 1) % RING_SIZE;
 		if (h->ring_avail < RING_SIZE)
 			h->ring_avail++;
 		else
-			h->ring_tail = (h->ring_tail + 1) % RING_SIZE;  /* drop oldest */
+			h->ring_tail = (h->ring_tail + 1) % RING_SIZE;
 	}
-
 	pthread_mutex_unlock(&h->ring_lock);
 }
 

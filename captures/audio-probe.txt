@@ -1,0 +1,63 @@
+=== DualSense Audio Probe ===
+Date: Mon Mar 23 17:35:08 2026
+
+=== Probe 1: Baseline input reports ===
+  Total: 0 reports received
+
+=== Probe 4: Feature reports ===
+  0x05 (calibration): 41 bytes
+    05 FA FF FF FF FE FF 8D 22 65 DD 9B 22 60 DD AD 
+    22 50 DD 1C 02 1C 02 FB 1F 00 E0 82 1F A4 DF 08 
+    ... (9 more)
+  0x09 (MAC address): 20 bytes
+    09 01 CA 89 51 AB A0 08 25 00 66 4C 74 1D BD 20 
+    24 2A 44 52 
+  0x20 (firmware version): 64 bytes
+    20 4A 75 6C 20 20 34 20 32 30 32 35 31 30 3A 31 
+    30 3A 33 32 03 00 04 00 13 03 00 00 2A 00 10 01 
+    ... (32 more)
+  0x22 (unknown): 64 bytes
+    22 03 00 13 03 00 00 2A 00 10 01 00 00 00 00 00 
+    00 01 CA 89 51 AB A0 0A 00 02 00 06 00 00 00 19 
+    ... (32 more)
+  0x08 (unknown): 48 bytes
+    08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+    00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+    ... (16 more)
+  0x06 (unknown): not available (errno=5)
+
+=== Probe 2: Audio flag combinations ===
+
+  Testing: baseline (haptics+triggers) (flags0=0x03, flags1=0x00)
+  → Got 0 reports, max size: 0 bytes
+
+  Testing: flags0 bit 2 (possible audio control) (flags0=0x07, flags1=0x00)
+  → Got 0 reports, max size: 0 bytes
+
+  Testing: flags0 bits 2-3 (audio+mic?) (flags0=0x0F, flags1=0x00)
+  → Got 0 reports, max size: 0 bytes
+
+  Testing: flags0 bits 2-4 (audio+mic+speaker?) (flags0=0x1F, flags1=0x00)
+  → Got 0 reports, max size: 0 bytes
+
+  Testing: flags0 bits 2-5 (flags0=0x3F, flags1=0x00)
+  → Got 0 reports, max size: 0 bytes
+
+  Testing: flags0 bits 2-6 (flags0=0x7F, flags1=0x00)
+  → Got 0 reports, max size: 0 bytes
+
+  Testing: flags0 all bits (flags0=0xFF, flags1=0x00)
+  → Got 0 reports, max size: 0 bytes
+
+  Testing: all flags (flags0=0xFF, flags1=0xFF)
+  → Got 0 reports, max size: 0 bytes
+
+=== Probe 3: Input reports during haptics ===
+  Haptics streaming active. Reading input reports...
+  Unique report sizes seen: 
+
+  Checking for audio patterns in last report...
+  Haptics stopped.
+
+=== Probe complete ===
+Save this output: ds-audio-probe 2>&1 | tee captures/audio-probe.txt
