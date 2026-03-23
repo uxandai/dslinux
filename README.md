@@ -16,9 +16,26 @@ A C library (`libdualsense.so`), daemon (`dualsensed`), and CLI tool (`dsctl`) �
 - Works over **Bluetooth** and USB
 - BT CRC32 and sequence tag handling (transparent to user)
 - Daemon with Unix socket IPC (JSON protocol)
+- **DSX-compatible UDP listener** (port 6969) — existing Windows game mods work through Proton/Wine without modification
+- 60-second mod timeout with automatic reset
 - Supports DualSense (0CE6) and DualSense Edge (0DF2)
+- GTK4 GUI for visual control
+
+## Quick Install
+
+```bash
+./build.sh && ./install.sh
+```
 
 ## Build
+
+```bash
+./build.sh              # release build
+./build.sh debug        # debug with sanitizers
+./build.sh clean        # remove build dir
+```
+
+Or manually:
 
 ```bash
 cmake -B build
@@ -262,10 +279,67 @@ ds_close(dev);
 
 Link with `-ldualsense`.
 
+## DSX Game Mod Compatibility
+
+`dualsensed` includes a **DSX-compatible UDP listener** on port 6969.  Existing Windows game mods that send DSX packets (e.g., from Nexus Mods) work through Proton/Wine without modification.
+
+### How it works
+
+1. Start the daemon: `dualsensed`
+2. Launch a game through Steam/Proton that has a DSX mod installed (.asi file)
+3. The mod sends UDP JSON packets to `127.0.0.1:6969`
+4. `dualsensed` receives them and applies trigger/LED effects to your controller
+
+### DSX Protocol
+
+The daemon understands the full DSX instruction set:
+
+```bash
+# Test DSX protocol manually with netcat:
+echo '{"Instructions":[{"Type":1,"Parameters":[0,2,22,2,7,8]}]}' | nc -u 127.0.0.1 6969
+
+# Type=1: TriggerUpdate
+# Parameters: [controller=0, side=2(Right), mode=22(WEAPON), start=2, end=7, strength=8]
+```
+
+**Supported DSX instruction types:**
+
+| Type | Name | Description |
+|------|------|-------------|
+| 0 | GetDSXStatus | Query — returns controller info |
+| 1 | TriggerUpdate | Set adaptive trigger effect |
+| 2 | RGBUpdate | Set lightbar color |
+| 3 | PlayerLED | Set player LEDs (legacy) |
+| 5 | MicLED | Set microphone LED |
+| 6 | PlayerLEDNewRevision | Set player LEDs (preset) |
+| 7 | ResetToUserSettings | Clear all mod effects |
+
+**Supported DSX trigger modes (Type=1, Parameters[2]):**
+
+| ID | Mode | ID | Mode |
+|----|------|----|------|
+| 0/20 | Off | 14 | Bow |
+| 21 | Feedback | 15 | Galloping |
+| 22 | Weapon | 18 | Machine |
+| 23 | Vibration | 24 | Slope Feedback |
+| 8 | Vibrate Trigger | 25 | Multi-Position Feedback |
+| 12 | Custom Raw | 26 | Multi-Position Vibration |
+
+### Daemon options
+
+```bash
+dualsensed                    # default: Unix socket + UDP 6969
+dualsensed --dsx-port 7070    # custom DSX port
+dualsensed --no-dsx           # disable UDP, Unix socket only
+```
+
+If no DSX mod packets are received for 60 seconds, all trigger effects are automatically reset.
+
 ## Steam / Gaming Notes
 
 - **Native DualSense games** (Ratchet & Clank, Spider-Man, etc.): Disable Steam Input per-game for native adaptive trigger support. These games send trigger effects directly to the controller — no extra software needed.
-- **Non-native games**: Use `dualsensed` + a per-game script that reads game state and sends trigger commands.
+- **Games with DSX mods**: Start `dualsensed`, install the .asi mod, play through Proton. The mod talks to our daemon instead of DSX.
+- **Non-native games without mods**: Use `dsctl` or the GUI to set trigger effects manually.
 - **Steam Input ON**: Triggers and haptics are lost — Steam emulates XInput which has no trigger API.
 
 ## License

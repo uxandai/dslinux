@@ -113,13 +113,16 @@ Calculation:
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Game / App  │────▶│  dualsensed  │────▶│  /dev/hidrawN│──▶ DualSense
-│  (client)    │ IPC │  (daemon)    │ HID │  (kernel)    │    (controller)
-└─────────────┘     └──────────────┘     └──────────────┘
-       │                    │
-  Unix socket          libdualsense.so
-  JSON protocol        C library
+┌─────────────┐                          ┌──────────────┐
+│  dsctl CLI   │──Unix socket──┐         │              │
+└─────────────┘                ▼         │              │
+┌─────────────┐          ┌──────────┐    │ /dev/hidrawN │──▶ DualSense
+│  GUI (GTK4)  │──Unix──▶│dualsensed│───▶│   (kernel)   │   (controller)
+└─────────────┘          └──────────┘    │              │
+┌─────────────┐                ▲         │              │
+│ Game mod     │──UDP 6969─────┘         └──────────────┘
+│ (Proton/Wine)│  (DSX-compatible)
+└─────────────┘
 ```
 
 ### Components
@@ -135,9 +138,11 @@ Calculation:
 
 2. **`dualsensed`** — Daemon
    - Holds hidraw fd open persistently (no open/close per command)
-   - IPC via Unix socket (JSON protocol)
-   - Coalesces rapid updates (max ~250 reports/sec over BT)
-   - Auto-reconnect on device disconnect
+   - IPC via Unix socket (native JSON-line protocol)
+   - **DSX-compatible UDP listener** (port 6969) — existing Windows game mods
+     running in Proton/Wine can control triggers without modification
+   - DSX protocol: `{"Instructions":[{"Type":1,"Parameters":[0,2,22,40,160,8]}]}`
+   - 60-second mod timeout (auto-reset when game stops sending)
    - Systemd unit file
 
 3. **`dsctl`** — CLI tool
