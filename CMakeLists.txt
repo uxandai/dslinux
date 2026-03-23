@@ -64,6 +64,18 @@ add_executable(ds-haptics-test cli/ds-haptics-test.c)
 target_include_directories(ds-haptics-test PRIVATE src)
 target_link_libraries(ds-haptics-test PRIVATE dualsense m)
 
+# Tests
+enable_testing()
+
+add_executable(test_crc32 test/test_crc32.c src/crc32.c)
+target_include_directories(test_crc32 PRIVATE src)
+add_test(NAME crc32 COMMAND test_crc32)
+
+add_executable(test_triggers test/test_triggers.c src/triggers.c)
+target_include_directories(test_triggers PRIVATE src)
+target_link_libraries(test_triggers PRIVATE m)
+add_test(NAME triggers COMMAND test_triggers)
+
 # Install targets
 include(GNUInstallDirs)
 
