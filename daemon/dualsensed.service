@@ -1,0 +1,12 @@
+[Unit]
+Description=DualSense Controller Daemon
+After=bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/dualsensed
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
