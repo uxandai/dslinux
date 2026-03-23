@@ -32,9 +32,23 @@
 #include <unistd.h>
 
 #define MAX_CLIENTS          8
+#define MAX_DEVICES          4
 #define BUF_SIZE             4096
 #define DSX_DEFAULT_PORT     6969
 #define DSX_MOD_TIMEOUT_SEC  60    /* reset after 60s of no UDP messages */
+
+/* ── Multi-device state ─────────────────────────────────────────── */
+
+static ds_device_t *g_devices[MAX_DEVICES];
+static int g_ndevices = 0;
+
+/* Get device by index (0-based), or first device if idx is -1 or 0 */
+static ds_device_t *get_device(int idx)
+{
+	if (g_ndevices == 0) return NULL;
+	if (idx < 0 || idx >= g_ndevices) idx = 0;
+	return g_devices[idx];
+}
 
 static volatile sig_atomic_t g_running = 1;
 
@@ -216,20 +230,20 @@ static void send_response(int fd, bool ok, const char *error)
 	(void)write(fd, buf, strlen(buf));
 }
 
-static void send_info(int fd, ds_device_t *dev)
-{
-	char buf[256];
-	snprintf(buf, sizeof(buf),
-	         "{\"ok\":true,\"connection\":\"%s\"}\n",
-	         ds_connection_type(dev) == DS_BT ? "bluetooth" : "usb");
-	(void)write(fd, buf, strlen(buf));
-}
-
-static void handle_native_command(ds_device_t *dev, int client_fd, const char *line)
+static void handle_native_command(int client_fd, const char *line)
 {
 	char cmd[32];
 	if (!json_find_str(line, "cmd", cmd, sizeof(cmd))) {
 		send_response(client_fd, false, "missing cmd");
+		return;
+	}
+
+	/* Optional "device" field selects controller index (default: 0) */
+	int dev_idx = 0;
+	json_find_int(line, "device", &dev_idx);
+	ds_device_t *dev = get_device(dev_idx);
+	if (!dev) {
+		send_response(client_fd, false, "no controller connected");
 		return;
 	}
 
@@ -247,7 +261,17 @@ static void handle_native_command(ds_device_t *dev, int client_fd, const char *l
 	else if (strcasecmp(cmd, "mute-led") == 0 || strcasecmp(cmd, "mute_led") == 0)
 		ret = handle_mute_led(dev, line);
 	else if (strcasecmp(cmd, "info") == 0) {
-		send_info(client_fd, dev);
+		/* Return info for all devices */
+		char buf[512];
+		int off = snprintf(buf, sizeof(buf), "{\"ok\":true,\"devices\":[");
+		for (int i = 0; i < g_ndevices; i++) {
+			if (i > 0) off += snprintf(buf + off, sizeof(buf) - off, ",");
+			off += snprintf(buf + off, sizeof(buf) - off,
+				"{\"index\":%d,\"connection\":\"%s\"}",
+				i, ds_connection_type(g_devices[i]) == DS_BT ? "bluetooth" : "usb");
+		}
+		snprintf(buf + off, sizeof(buf) - off, "]}\n");
+		(void)write(client_fd, buf, strlen(buf));
 		need_send = false;
 	} else {
 		send_response(client_fd, false, "unknown command");
@@ -572,15 +596,23 @@ int main(int argc, char **argv)
 	signal(SIGTERM, sig_handler);
 	signal(SIGPIPE, SIG_IGN);
 
-	/* Open controller */
-	ds_device_t *dev = ds_open(devpath);
-	if (!dev) {
-		perror("Failed to open DualSense");
+	/* Open controller(s) */
+	if (devpath) {
+		g_devices[0] = ds_open(devpath);
+		g_ndevices = g_devices[0] ? 1 : 0;
+	} else {
+		g_ndevices = ds_open_all(g_devices, MAX_DEVICES);
+	}
+
+	if (g_ndevices == 0) {
+		fprintf(stderr, "No DualSense controllers found\n");
 		return 1;
 	}
 
-	printf("DualSense connected via %s\n",
-	       ds_connection_type(dev) == DS_BT ? "Bluetooth" : "USB");
+	for (int i = 0; i < g_ndevices; i++) {
+		printf("Controller %d: %s\n", i,
+		       ds_connection_type(g_devices[i]) == DS_BT ? "Bluetooth" : "USB");
+	}
 
 	/* Create Unix listening socket */
 	char sock_path[256];
@@ -590,7 +622,7 @@ int main(int argc, char **argv)
 	int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (listen_fd < 0) {
 		perror("socket(unix)");
-		ds_close(dev);
+		for (int d = 0; d < g_ndevices; d++) ds_close(g_devices[d]);
 		return 1;
 	}
 
@@ -600,7 +632,7 @@ int main(int argc, char **argv)
 	if (bind(listen_fd, (struct sockaddr *)&unix_addr, sizeof(unix_addr)) < 0) {
 		perror("bind(unix)");
 		close(listen_fd);
-		ds_close(dev);
+		for (int d = 0; d < g_ndevices; d++) ds_close(g_devices[d]);
 		return 1;
 	}
 	chmod(sock_path, 0660);
@@ -667,10 +699,12 @@ int main(int argc, char **argv)
 			time_t now = time(NULL);
 			if (now - last_dsx_msg > DSX_MOD_TIMEOUT_SEC) {
 				printf("DSX mod timeout — resetting triggers\n");
-				ds_trigger_off(dev, DS_TRIGGER_LEFT);
-				ds_trigger_off(dev, DS_TRIGGER_RIGHT);
-				ds_rumble(dev, 0, 0);
-				ds_send(dev);
+				for (int d = 0; d < g_ndevices; d++) {
+					ds_trigger_off(g_devices[d], DS_TRIGGER_LEFT);
+					ds_trigger_off(g_devices[d], DS_TRIGGER_RIGHT);
+					ds_rumble(g_devices[d], 0, 0);
+					ds_send(g_devices[d]);
+				}
 				dsx_active = false;
 			}
 		}
@@ -706,8 +740,8 @@ int main(int argc, char **argv)
 			                     (struct sockaddr *)&client_addr, &addr_len);
 			if (n > 0) {
 				buf[n] = '\0';
-				dsx_process_packet(dev, buf);
-				dsx_send_response(udp_fd, &client_addr, addr_len, dev);
+				dsx_process_packet(get_device(0), buf);
+				dsx_send_response(udp_fd, &client_addr, addr_len, get_device(0));
 				last_dsx_msg = time(NULL);
 				dsx_active = true;
 			}
@@ -733,20 +767,23 @@ int main(int argc, char **argv)
 			while ((nl = strchr(line, '\n')) != NULL) {
 				*nl = '\0';
 				if (strlen(line) > 0)
-					handle_native_command(dev, fds[i].fd, line);
+					handle_native_command(fds[i].fd, line);
 				line = nl + 1;
 			}
 			if (strlen(line) > 0)
-				handle_native_command(dev, fds[i].fd, line);
+				handle_native_command(fds[i].fd, line);
 		}
 	}
 
 	/* Cleanup */
 	printf("\nShutting down...\n");
-	ds_trigger_off(dev, DS_TRIGGER_LEFT);
-	ds_trigger_off(dev, DS_TRIGGER_RIGHT);
-	ds_rumble(dev, 0, 0);
-	ds_send(dev);
+	for (int d = 0; d < g_ndevices; d++) {
+		ds_trigger_off(g_devices[d], DS_TRIGGER_LEFT);
+		ds_trigger_off(g_devices[d], DS_TRIGGER_RIGHT);
+		ds_rumble(g_devices[d], 0, 0);
+		ds_send(g_devices[d]);
+		ds_close(g_devices[d]);
+	}
 
 	for (int i = POLL_CLIENTS; i < nfds; i++) {
 		if (fds[i].fd >= 0)
@@ -755,7 +792,6 @@ int main(int argc, char **argv)
 	if (udp_fd >= 0) close(udp_fd);
 	close(listen_fd);
 	unlink(sock_path);
-	ds_close(dev);
 
 	return 0;
 }

@@ -15,6 +15,15 @@
 int ds_hidraw_open(const char *path, int *fd, ds_conn_t *conn);
 
 /*
+ * Open ALL connected DualSense controllers.
+ * @param fds    Output array of file descriptors (caller-allocated).
+ * @param conns  Output array of connection types (caller-allocated).
+ * @param max    Max number of devices to open (array size).
+ * @return Number of devices opened (0 if none found), or negative errno.
+ */
+int ds_hidraw_open_all(int *fds, ds_conn_t *conns, int max);
+
+/*
  * Close a hidraw file descriptor.
  */
 void ds_hidraw_close(int fd);

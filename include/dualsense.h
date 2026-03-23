@@ -65,6 +65,14 @@ ds_device_t *ds_open(const char *hidraw_path);
 /* Close and free device.  Safe to call with NULL. */
 void ds_close(ds_device_t *dev);
 
+/*
+ * Open ALL connected DualSense controllers.
+ * @param devs   Output array of device handles (caller-allocated).
+ * @param max    Max number of devices (array size).
+ * @return Number of devices opened (0 if none found).
+ */
+int ds_open_all(ds_device_t **devs, int max);
+
 /* Query connection type.  dev must not be NULL. */
 ds_conn_t ds_connection_type(const ds_device_t *dev);
 

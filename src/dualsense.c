@@ -148,6 +148,31 @@ void ds_close(ds_device_t *dev)
 	free(dev);
 }
 
+int ds_open_all(ds_device_t **devs, int max)
+{
+	int fds[max];
+	ds_conn_t conns[max];
+
+	int n = ds_hidraw_open_all(fds, conns, max);
+	if (n <= 0) return n;
+
+	int opened = 0;
+	for (int i = 0; i < n; i++) {
+		ds_device_t *dev = calloc(1, sizeof(*dev));
+		if (!dev) {
+			ds_hidraw_close(fds[i]);
+			continue;
+		}
+		dev->fd = fds[i];
+		dev->conn = conns[i];
+		ds_effect_off(dev->r_trigger);
+		ds_effect_off(dev->l_trigger);
+		devs[opened++] = dev;
+	}
+
+	return opened;
+}
+
 ds_conn_t ds_connection_type(const ds_device_t *dev)
 {
 	return dev->conn;

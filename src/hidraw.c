@@ -118,6 +118,44 @@ int ds_hidraw_open(const char *path, int *fd, ds_conn_t *conn)
 	return ret;
 }
 
+int ds_hidraw_open_all(int *fds, ds_conn_t *conns, int max)
+{
+	DIR *dir = opendir("/sys/class/hidraw");
+	if (!dir)
+		return -errno;
+
+	struct dirent *entry;
+	int count = 0;
+
+	while ((entry = readdir(dir)) != NULL && count < max) {
+		if (strncmp(entry->d_name, "hidraw", 6) != 0)
+			continue;
+
+		char sysfs[512];
+		snprintf(sysfs, sizeof(sysfs), "/sys/class/hidraw/%s", entry->d_name);
+
+		uint16_t vid, pid, bus;
+		if (parse_hid_id(sysfs, &vid, &pid, &bus) < 0)
+			continue;
+		if (!is_dualsense(vid, pid))
+			continue;
+
+		char devpath[512];
+		snprintf(devpath, sizeof(devpath), "/dev/%s", entry->d_name);
+
+		int fd;
+		ds_conn_t conn;
+		if (try_open(devpath, &fd, &conn) == 0) {
+			fds[count] = fd;
+			conns[count] = conn;
+			count++;
+		}
+	}
+
+	closedir(dir);
+	return count;
+}
+
 void ds_hidraw_close(int fd)
 {
 	if (fd >= 0)
