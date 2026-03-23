@@ -21,13 +21,14 @@ set(LIB_SOURCES
     src/crc32.c
     src/triggers.c
     src/hidraw.c
+    src/haptics.c
 )
 
 # Shared library
 add_library(dualsense SHARED ${LIB_SOURCES})
 target_include_directories(dualsense PUBLIC include)
 target_include_directories(dualsense PRIVATE src)
-target_link_libraries(dualsense PRIVATE m)
+target_link_libraries(dualsense PRIVATE m pthread)
 set_target_properties(dualsense PROPERTIES
     VERSION 0.1.0
     SOVERSION 0
@@ -38,7 +39,7 @@ set_target_properties(dualsense PROPERTIES
 add_library(dualsense_static STATIC ${LIB_SOURCES})
 target_include_directories(dualsense_static PUBLIC include)
 target_include_directories(dualsense_static PRIVATE src)
-target_link_libraries(dualsense_static PRIVATE m)
+target_link_libraries(dualsense_static PRIVATE m pthread)
 set_target_properties(dualsense_static PROPERTIES
     OUTPUT_NAME dualsense
 )
@@ -50,6 +51,11 @@ target_link_libraries(dsctl PRIVATE dualsense)
 # Daemon
 add_executable(dualsensed daemon/dualsensed.c)
 target_link_libraries(dualsensed PRIVATE dualsense)
+
+# Haptics test tool
+add_executable(ds-haptics-test cli/ds-haptics-test.c)
+target_include_directories(ds-haptics-test PRIVATE src)
+target_link_libraries(ds-haptics-test PRIVATE dualsense m)
 
 # Install targets
 include(GNUInstallDirs)
