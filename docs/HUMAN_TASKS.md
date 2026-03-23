@@ -19,199 +19,127 @@ These are things that require physical hardware or manual steps that I can't do 
 - Which steps passed/failed
 - `dsctl info` output (USB or Bluetooth?)
 - `dmesg | tail -20` after any failure (CRC errors?)
-- Screenshots of GUI if it opens
+- Screenshot of GUI if it opens
 
 ---
 
-## Task 2: BT Packet Sniffing (for #18 — Audio Jack over BT)
+## Task 2: BT Audio & Mic Discovery (automated)
 
-**What:** Capture raw BT HID packets from DSX on Windows while it sends audio to the DualSense speaker/jack.
+**What:** Run `ds-audio-probe` — it automatically tests all audio-related
+capabilities of the controller over BT. This replaces manual BT sniffing.
 
-**Why:** We know audio uses report 0x32 with Opus-encoded sub-packets, but we don't know the exact sub-packet ID (probably 0x13) or the audio config bytes. One capture session will give us everything.
+**Time:** ~2 min (fully automated)
+
+**You need:**
+- DualSense paired over **Bluetooth** (not USB — audio features are BT-only)
+- Built project (`./build.sh`)
+- Udev rules installed
+
+### What to run:
+
+```bash
+mkdir -p captures
+./build/ds-audio-probe 2>&1 | tee captures/audio-probe.txt
+```
+
+### What the tool does (4 probes, all automatic):
+
+| Probe | What it tests | What we're looking for |
+|-------|--------------|----------------------|
+| **1. Baseline** | Reads normal BT input reports | Expect 78 bytes — establishes normal size |
+| **2. Audio flags** | Sends 8 different flag combinations in report 0x31 (the control report) | If any flag makes input reports grow beyond 78 bytes → we found the audio enable switch |
+| **3. During haptics** | Starts haptics streaming (report 0x32), then reads input reports | If reports grow to 547 bytes → controller entered extended audio mode with mic data |
+| **4. Feature reports** | Reads feature reports 0x05, 0x09, 0x20, 0x22, 0x08, 0x06 | Reveals audio config, firmware version, MAC address |
+
+### What to report back:
+
+Send me the file `captures/audio-probe.txt`. Key things to look for:
+
+- **`*** EXTENDED REPORT DETECTED!`** — this means we found audio data! The hex dump that follows contains mic audio.
+- **`*** Possible audio data!`** — non-zero bytes after position 78 in input reports = mic PCM
+- **`New report size: XXX bytes`** — any number other than 78 is interesting
+- Feature report contents (firmware version etc.)
+
+### If extended reports ARE found:
+
+I can then:
+1. Parse the audio format from the hex dump
+2. Write a mic capture module
+3. Expose it as a PipeWire audio source
+
+### If nothing changes (all 78 bytes):
+
+Then the controller needs a different handshake to enter audio mode. Next step would be Task 3 (BT sniffing from Windows).
+
+---
+
+## Task 3: BT Packet Sniffing (only if Task 2 finds nothing)
+
+**What:** Capture raw BT packets from DSX on Windows while it streams audio to the DualSense.
+
+**Why:** If our automated probe can't trigger extended mode, we need to see what DSX sends differently.
 
 **Time:** ~30 min
 
 **You need:**
-- Windows PC (real or VM with BT passthrough)
-- DualSense paired over BT to the Windows PC
-- DSX+ installed and running (you have it on Steam)
-- Wireshark installed on Windows
+- Windows PC (real or VM with BT adapter passthrough)
+- DualSense paired over BT to Windows
+- DSX+ running with BT Audio Haptics enabled
+- Wireshark with USBPcap
 
-### Steps:
+### Steps (Wireshark + USBPcap):
 
-#### Option A: Wireshark + USBPcap (easiest if BT adapter is USB)
+1. Install Wireshark on Windows (check "Install USBPcap" during setup)
+2. Pair DualSense over BT
+3. Open Wireshark, select "USBPcap1" interface
+4. Start capture
+5. Open DSX+, enable BT Audio/Haptics, play audio for 15 seconds
+6. Stop capture, save as `captures/dualsense-bt-audio.pcapng`
 
-1. **Install Wireshark** on Windows: https://www.wireshark.org/download.html
-   - During install, check "Install USBPcap" — this captures USB traffic including BT HCI
+### Alternative (btmon on Linux host with VM):
 
-2. **Pair DualSense** to Windows PC over Bluetooth
+```bash
+# On Linux host while Windows VM uses BT adapter:
+sudo btmon -w captures/dualsense-bt-capture.btsnoop
+# In VM: start DSX, enable BT Audio, play 15 sec
+# Ctrl+C to stop btmon
+```
 
-3. **Start Wireshark**, select "USBPcap1" interface (not Ethernet/Wi-Fi)
+### Alternative (DSX debug log):
 
-4. **Set capture filter** (optional, reduces noise):
-   ```
-   usb.transfer_type == 0x03
-   ```
+In DSX settings → Debug → enable "Log HID Reports". Copy the log file to `captures/`.
 
-5. **Start capture** (green shark fin button)
+### What to send me:
 
-6. **Open DSX+**, connect to the DualSense over BT
-
-7. **Enable BT Audio Haptics** in DSX settings:
-   - Go to Haptics/Audio tab
-   - Enable "Bluetooth Audio/Haptics"
-   - Set audio source to "Loopback" or play a test file
-   - Make sure you hear audio from the controller speaker or feel haptics
-
-8. **Let it run for 10-15 seconds** with audio playing
-
-9. **Stop capture** in Wireshark
-
-10. **Save as** `dualsense-bt-audio.pcapng`
-
-11. **Apply display filter** to find our reports:
-    ```
-    btatt.value[0] == 0x32
-    ```
-    or
-    ```
-    bthid.data[0] == 0x32
-    ```
-
-12. **Export filtered packets**: File → Export Specified Packets → save as `report_0x32_only.pcapng`
-
-#### Option B: btmon on Linux (if you have BT adapter passthrough to Windows VM)
-
-Actually simpler — run btmon on the Linux host while DSX runs in a Windows VM:
-
-1. Pair DualSense to VM's BT (via USB BT adapter passthrough)
-2. On Linux host:
-   ```bash
-   sudo btmon -w dualsense-bt-capture.btsnoop
-   ```
-3. In VM: start DSX, enable BT Audio Haptics, play audio for 15 sec
-4. Stop btmon (Ctrl+C)
-5. Convert to pcap:
-   ```bash
-   tshark -r dualsense-bt-capture.btsnoop -w dualsense-bt-audio.pcapng
-   ```
-
-#### Option C: Android BT HCI snoop log
-
-If you have an Android phone:
-1. Enable Developer Options → Enable Bluetooth HCI snoop log
-2. Pair DualSense to phone
-3. Use an app that sends haptics/audio to controller
-4. Pull the log: `adb pull /data/misc/bluetooth/logs/btsnoop_hci.log`
-
-### What I need from the capture:
-
-Send me the .pcapng or .btsnoop file. I will extract:
-
-1. **Report 0x32 packets with audio** — compare with haptics-only packets
-2. **Sub-packet ID for Opus audio** — the byte that differs from 0x12
-3. **Audio config sub-packet** — what bytes change when audio is enabled vs disabled
-4. **Report size** — is it still 141 bytes or longer when audio is included?
-5. **Opus frame size** — how many bytes per Opus frame
-6. **Interleaving pattern** — how audio and haptics sub-packets alternate
-
-### Alternative: Quick hex dump (no Wireshark needed)
-
-If Wireshark is too complex, you can do this:
-
-1. On Windows with DSX running + BT audio active:
-   ```powershell
-   # PowerShell - list HID devices
-   Get-PnpDevice -Class HIDClass | Where-Object {$_.FriendlyName -like "*DualSense*"}
-   ```
-
-2. Or use **HID Logger** tool: https://github.com/todbot/hidapitester
-   ```
-   hidapitester --vidpid 054C:0CE6 --open --read-feature 0x32 --length 141
-   ```
-
-3. **Even simpler**: In DSX, go to Settings → Debug → enable "Log HID Reports". Then find the log file in `%LOCALAPPDATA%/DSX/` and send it to me.
+Any of: `.pcapng`, `.btsnoop`, or DSX debug log file in `captures/`.
 
 ---
 
-## Task 3: Mic / Duplex Audio Testing (for #19)
+## Task 4: SAxense Duplex Watch (passive)
 
-**What:** Check if the DualSense sends audio data (from its mic) over BT when haptics streaming is active.
-
-**Time:** ~10 min
-
-**You need:**
-- DualSense paired over BT on Linux
-- Built project with haptics support
-
-### Steps:
-
-1. **Start haptics streaming:**
-   ```bash
-   ./build/ds-haptics-test --sine 150
-   ```
-
-2. **In another terminal, read raw input reports and check size:**
-   ```bash
-   # Check input report size (normally 78 for BT)
-   sudo cat /dev/hidraw3 | xxd | head -5
-   ```
-   Note the length — if it's bigger than 78 (especially 547), mic data may be present.
-
-3. **Try enabling audio flags in output report 0x31:**
-   ```bash
-   # Set audio control enable flag (bit in flags0)
-   # We'd need a small test tool for this — I can write one
-   ```
-
-4. **Monitor with btmon:**
-   ```bash
-   sudo btmon | grep -i "size\|report\|audio"
-   ```
-   Check if input report sizes change after haptics is started.
-
-### What to report:
-- Input report size before haptics: ___ bytes
-- Input report size during haptics: ___ bytes
-- Any change in btmon output
-- `dmesg` output if anything appears
-
----
-
-## Task 4: SAxense Duplex Monitoring
-
-**What:** Watch the SAxense repo for duplex audio release.
-
-**URL:** https://github.com/egormanga/SAxense
+**What:** Check https://github.com/egormanga/SAxense periodically for duplex audio release.
 
 **When it drops:**
-1. Read the new code
-2. Tell me about it — or I can read it directly if you pull the repo:
-   ```bash
-   git clone https://github.com/egormanga/SAxense /home/pp/Praca/AI/dualsenselinux/reference/SAxense
-   ```
+```bash
+git clone https://github.com/egormanga/SAxense reference/SAxense
+```
+
+Tell me and I'll port it.
 
 ---
 
-## Priority order
+## Priority
 
-1. **Task 1** (basic validation) — do this first, takes 15 min, validates everything
-2. **Task 3** (mic test) — quick, do it right after Task 1 while pad is connected
-3. **Task 2** (BT sniff) — needs Windows, takes 30 min, unlocks audio jack feature
-4. **Task 4** (SAxense watch) — passive, just check periodically
+1. **Task 1** — basic validation, 15 min, validates everything we built
+2. **Task 2** — audio probe, 2 min, may unlock mic without Windows
+3. **Task 3** — only if Task 2 finds nothing, needs Windows
+4. **Task 4** — passive background check
 
-## Files to send me
+## Where to put results
 
-After completing tasks, drop files here:
-```
-/home/pp/Praca/AI/dualsenselinux/captures/
-```
-
-Create the dir and put captures there:
 ```bash
 mkdir -p captures
-# e.g.:
-# captures/dualsense-bt-audio.pcapng   (Task 2)
-# captures/input-report-sizes.txt      (Task 3)
-# captures/test-results.txt            (Task 1)
+# Task 1: captures/test-results.txt
+# Task 2: captures/audio-probe.txt   ← just run the command above
+# Task 3: captures/dualsense-bt-audio.pcapng
 ```
