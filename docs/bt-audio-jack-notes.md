@@ -102,10 +102,33 @@ Tested on real hardware. Findings:
    - Still no audio from speaker/jack
    - Confirms: speaker audio needs different encoding, not just volume
 
-3. **Conclusion: speaker requires Opus-encoded sub-packet (likely 0x13)**
-   - Raw PCM on sub-packet 0x12 = haptics only (proven)
-   - Speaker needs Opus at 48kHz (from DSX RE) on a different sub-packet
-   - Need BT packet capture from DSX to discover exact format
+3. **BREAKTHROUGH: Speaker DOES work with raw PCM on sub-packet 0x12!**
+   - Previous test failed because speaker routing was not enabled
+   - Fix: send `dualsensectl speaker internal` + `dualsensectl volume N` first
+   - Then report 0x32 with sub-packet 0x12 plays through BOTH speaker and haptics
+   - This means speaker audio does NOT require Opus — raw 3kHz PCM works!
+   - To separate speaker from haptics: may need different routing or channel assignment
+
+   Required setup via report 0x31 before streaming report 0x32:
+   - flag0 bit 7: AUDIO_CONTROL_ENABLE
+   - audio_flags bits 4-5: OUTPUT_PATH = 3 (internal speaker)
+   - speaker_audio_volume: 0x00-0x64 (PS5 range: 0x3D-0x64)
+   - flag0 bit 5: SPEAKER_VOLUME_ENABLE
+
+5. **Speaker and haptics share the same physical actuators**
+   - DualSense VCM linear resonant actuators ARE the speakers
+   - At 3kHz 2-channel PCM, both channels drive both actuators
+   - Cannot fully separate speaker audio from haptic vibration in this mode
+   - On USB/PS5: 4 channels separate them (ch 1-2 speaker, ch 3-4 haptics)
+   - Higher frequencies (800Hz+) are more audible and less felt as vibration
+   - Lower amplitude reduces vibration but also speaker volume
+   - Speaker volume control (report 0x31) amplifies the speaker output independently
+   - Best result: high freq audio + low PCM amplitude + high speaker volume
+
+6. **To fully separate speaker from haptics over BT, likely need:**
+   - 4-channel mode (may require different report format or Opus encoding)
+   - Or DSX's approach: separate Audio sub-packet (Opus, 48kHz) that goes
+     only to the DAC/speaker amp, bypassing the haptic actuator path
 
 4. **Bonus discovery**: some flag values in pkt11 data[0] control mute LED
    (needs further investigation)

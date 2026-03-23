@@ -19,6 +19,6 @@
 | 15 | Unit tests | **Done** | CRC32 + trigger encoding (100% pass) |
 | 16 | GTK4 GUI | **Done** | Controller panel, triggers, rumble, lightbar |
 | 17 | Auto-reconnect | **Scaffolded** | Code commented, two approaches documented |
-| 18 | Audio jack/speaker over BT | **Blocked** | Confirmed: raw PCM→haptics only, speaker needs Opus sub-packet. Need BT capture from DSX on Windows |
+| 18 | Audio jack/speaker over BT | **Working (basic)** | Raw PCM via report 0x32 + speaker routing via report 0x31. Sound plays but also vibrates (shared actuators). Full separation may need 4ch/Opus |
 | 19 | Microphone over BT | **Research** | Waiting on SAxense duplex release |
 | 20 | DualSense Edge extras | **TODO** | Back buttons, profiles, stick tuning |
